@@ -25,7 +25,7 @@ Now that Judo is running, just type in a command that you'd like to be invoked
 runtime for a program is 60 seconds. So when you type `/bin/sleep 65` you'll see
 that Judo kills the process after one minute.
 
-## Develop custom programs
+## Use the library
 
 See the [GoDoc](https://godoc.org/github.com/makkes/judo).
 
