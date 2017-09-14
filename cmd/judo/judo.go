@@ -41,11 +41,16 @@ func main() {
 			argv = cmdArr[1:]
 		}
 
-		jobID, err := spawner.Spawn(cmdArr[0], argv)
+		quitChan := make(chan struct{})
+		err := spawner.Spawn(cmdArr[0], argv, quitChan)
 		if err != nil {
 			log.Error("Error starting job: %s", err)
 		} else {
-			log.Info("Job %d started", jobID)
+			log.Info("Job started")
+			go func(cmd string, quitChan chan struct{}) {
+				<-quitChan
+				log.Info("Job %s ended", cmd)
+			}(cmdArr[0], quitChan)
 		}
 	}
 }

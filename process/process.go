@@ -19,11 +19,9 @@ func StartWithTimeout(cmd string, argv []string, timeout time.Duration) <-chan i
 		timer := time.NewTimer(timeout)
 		select {
 		case <-timer.C:
-			log.Info("Maximum runtime exceeded, killing process")
 			killChan <- struct{}{}
 			quitChan <- -1
 		case exitStatus := <-internalQuitChan:
-			log.Info("Program %s exited with status %d\n", cmd, exitStatus)
 			timer.Stop()
 			quitChan <- exitStatus
 		}
@@ -55,7 +53,6 @@ func Start(cmd string, argv []string) (chan<- struct{}, <-chan int) {
 				Pdeathsig: syscall.SIGTERM,
 			}})
 		if err != nil {
-			log.Error("Error starting process: %v\n", err)
 			quitChan <- -1
 			return
 		}
@@ -66,12 +63,9 @@ func Start(cmd string, argv []string) (chan<- struct{}, <-chan int) {
 		go func() {
 			select {
 			case <-killChan:
-				log.Info("Received kill command, killing process")
 				err := syscall.Kill(-proc.Pid, syscall.SIGKILL)
 				if err != nil {
-					if syscall.ESRCH == err {
-						log.Info("Process already ended in the meantime")
-					} else {
+					if syscall.ESRCH != err { // there was a real error killing the process
 						log.Error("Error killing process: %s\n", err)
 					}
 				}

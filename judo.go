@@ -1,3 +1,7 @@
+// Package judo implements process spawning and management routines for simple
+// and efficient forking of new processes from Go programs. It offers
+// mechanisms to automatically kill long-running processes and manage the
+// number of parallel running processes.
 package judo
 
 import (
@@ -5,20 +9,20 @@ import (
 
 	"github.com/justsocialapps/justlib/work"
 	"github.com/makkes/judo/process"
-	log "gopkg.in/justsocialapps/justlib.v1/logging"
 )
 
 // A Spawner spawns and manages processes. It keeps track of running processes
 // and kills them according to a given policy (e.g. maximum runtime).
 type Spawner struct {
-	worker *work.Worker
-	jobCnt uint64
+	worker    *work.Worker
+	nextJobID uint64
 }
 
 type cmdParams struct {
-	jobID uint64
-	cmd   string
-	argv  []string
+	jobID    uint64
+	quitChan chan struct{}
+	cmd      string
+	argv     []string
 }
 
 // NewSpawner returns a new Spawner that can run maxProcs processes in
@@ -28,30 +32,51 @@ func NewSpawner(maxProcs int, maxRuntime uint) Spawner {
 	worker := work.NewWorker(maxProcs, func(payload work.Payload) interface{} {
 		params := payload.Data.(cmdParams)
 		quitChan := process.StartWithTimeout(params.cmd, params.argv, time.Duration(maxRuntime)*time.Second)
-		log.Info("Program %s exited with status %d\n", params.cmd, <-quitChan)
+		<-quitChan
 		return nil
 	}, false)
+
+	go func() {
+		completions := worker.Completions()
+		for {
+			completion, ok := <-completions
+			if !ok {
+				return
+			}
+			inParams := completion.Input.(cmdParams)
+			if inParams.quitChan != nil {
+				close(inParams.quitChan)
+			}
+		}
+	}()
 
 	return Spawner{
 		worker: worker,
 	}
 }
 
-// Spawn spawns a new process and returns its ID. The returned ID is not the
-// PID but an internal ID you can use to keep track of your processes. If an
-// error occurs, a non-nil error is returned.
-func (s *Spawner) Spawn(cmd string, argv []string) (uint64, error) {
-	jobID := s.jobCnt
+// Quit stops the spawner from accepting new jobs to spawn and tears down all
+// goroutines. All currently running processes are kept until either they quit
+// or are killed.
+func (s *Spawner) Quit() {
+	s.worker.Quit()
+}
+
+// Spawn spawns a new process. The quitChan is closed as soon as the process
+// ends. If an error occurs, a non-nil error is returned.
+func (s *Spawner) Spawn(cmd string, argv []string, quitChan chan struct{}) error {
+	jobID := s.nextJobID
 	err := s.worker.Dispatch(work.Payload{
-		cmdParams{
-			jobID: jobID,
-			cmd:   cmd,
-			argv:  argv,
+		Data: cmdParams{
+			jobID:    jobID,
+			quitChan: quitChan,
+			cmd:      cmd,
+			argv:     argv,
 		},
 	})
 	if err != nil {
-		return 0, err
+		return err
 	}
-	s.jobCnt += 1
-	return jobID, nil
+	s.nextJobID++
+	return nil
 }
