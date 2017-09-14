@@ -1,3 +1,5 @@
+// Package process implements the low-level process handling for judo. It
+// contains routines for starting a single process.
 package process
 
 import (
