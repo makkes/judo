@@ -20,7 +20,7 @@ type Spawner struct {
 
 type cmdParams struct {
 	jobID    uint64
-	quitChan chan struct{}
+	quitChan chan int
 	cmd      string
 	argv     []string
 }
@@ -32,8 +32,7 @@ func NewSpawner(maxProcs int, maxRuntime uint) Spawner {
 	worker := work.NewWorker(maxProcs, func(payload work.Payload) interface{} {
 		params := payload.Data.(cmdParams)
 		quitChan := process.StartWithTimeout(params.cmd, params.argv, time.Duration(maxRuntime)*time.Second)
-		<-quitChan
-		return nil
+		return <-quitChan
 	}, false)
 
 	go func() {
@@ -44,8 +43,9 @@ func NewSpawner(maxProcs int, maxRuntime uint) Spawner {
 				return
 			}
 			inParams := completion.Input.(cmdParams)
+			exitCode := completion.Output.(int)
 			if inParams.quitChan != nil {
-				close(inParams.quitChan)
+				inParams.quitChan <- exitCode
 			}
 		}
 	}()
@@ -62,9 +62,10 @@ func (s *Spawner) Quit() {
 	s.worker.Quit()
 }
 
-// Spawn spawns a new process. The quitChan is closed as soon as the process
-// ends. If an error occurs, a non-nil error is returned.
-func (s *Spawner) Spawn(cmd string, argv []string, quitChan chan struct{}) error {
+// Spawn spawns a new process. The quitChan will receive the exit code of the
+// process when it ends. This code is set to -1 when the process is killed
+// after a timeout. If an error occurs, a non-nil error is returned.
+func (s *Spawner) Spawn(cmd string, argv []string, quitChan chan int) error {
 	jobID := s.nextJobID
 	err := s.worker.Dispatch(work.Payload{
 		Data: cmdParams{
