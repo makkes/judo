@@ -14,7 +14,7 @@ import (
 // command as soon as the given duration expires. The returned channel signals
 // the exit code of the command.
 func StartWithTimeout(cmd string, argv []string, timeout time.Duration) <-chan int {
-	killChan, internalQuitChan := Start(cmd, argv)
+	killChan, internalQuitChan := Start(cmd, argv, "")
 	quitChan := make(chan int)
 
 	go func() {
@@ -25,11 +25,16 @@ func StartWithTimeout(cmd string, argv []string, timeout time.Duration) <-chan i
 			quitChan <- -1
 		case exitStatus := <-internalQuitChan:
 			timer.Stop()
-			quitChan <- exitStatus
+			quitChan <- exitStatus.ExitCode
 		}
 	}()
 
 	return quitChan
+}
+
+type Result struct {
+	ExitCode int
+	Err      error
 }
 
 // Start executes the given command with the given parameters and returns two
@@ -37,15 +42,16 @@ func StartWithTimeout(cmd string, argv []string, timeout time.Duration) <-chan i
 // sub-processes immediately; just send an empty struct to it. The second
 // channel signals the exit code of the command as soon as it is quit. This
 // code is set to -1 when the kill channel is used to kill the command.
-func Start(cmd string, argv []string) (chan<- struct{}, <-chan int) {
+func Start(cmd string, argv []string, dir string) (chan<- struct{}, <-chan Result) {
 	killChan := make(chan struct{})
-	quitChan := make(chan int)
+	quitChan := make(chan Result)
 
 	// start the process in a goroutine and quit the goroutine when the
 	// process exits.
 	go func() {
 		proc, err := os.StartProcess(cmd, append([]string{cmd}, argv...), &os.ProcAttr{
 			Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
+			Dir:   dir,
 			Sys: &syscall.SysProcAttr{
 				// set the PGID of the child process so we can kill
 				// all children with kill -PGID.
@@ -55,7 +61,10 @@ func Start(cmd string, argv []string) (chan<- struct{}, <-chan int) {
 				Pdeathsig: syscall.SIGTERM,
 			}})
 		if err != nil {
-			quitChan <- -1
+			quitChan <- Result{
+				ExitCode: -1,
+				Err: err,
+			}
 			return
 		}
 
@@ -90,7 +99,9 @@ func Start(cmd string, argv []string) (chan<- struct{}, <-chan int) {
 		//    In this case we receive a signal via the
 		//    mainRoutineQuitChan and just exit.
 		select {
-		case quitChan <- exitStatus:
+		case quitChan <- Result{
+			ExitCode: exitStatus,
+		}:
 		case <-mainRoutineQuitChan:
 		}
 
