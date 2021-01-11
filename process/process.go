@@ -14,7 +14,7 @@ import (
 // command as soon as the given duration expires. The returned channel signals
 // the exit code of the command.
 func StartWithTimeout(cmd string, argv []string, timeout time.Duration) <-chan int {
-	killChan, internalQuitChan := Start(cmd, argv, "")
+	killChan, internalQuitChan := Start(cmd, argv, "", os.Stdout)
 	quitChan := make(chan int)
 
 	go func() {
@@ -42,7 +42,7 @@ type Result struct {
 // sub-processes immediately; just send an empty struct to it. The second
 // channel signals the exit code of the command as soon as it is quit. This
 // code is set to -1 when the kill channel is used to kill the command.
-func Start(cmd string, argv []string, dir string) (chan<- struct{}, <-chan Result) {
+func Start(cmd string, argv []string, dir string, out *os.File) (chan<- struct{}, <-chan Result) {
 	killChan := make(chan struct{})
 	quitChan := make(chan Result)
 
@@ -50,7 +50,7 @@ func Start(cmd string, argv []string, dir string) (chan<- struct{}, <-chan Resul
 	// process exits.
 	go func() {
 		proc, err := os.StartProcess(cmd, append([]string{cmd}, argv...), &os.ProcAttr{
-			Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
+			Files: []*os.File{os.Stdin, out, os.Stderr},
 			Dir:   dir,
 			Sys: &syscall.SysProcAttr{
 				// set the PGID of the child process so we can kill
@@ -63,7 +63,7 @@ func Start(cmd string, argv []string, dir string) (chan<- struct{}, <-chan Resul
 		if err != nil {
 			quitChan <- Result{
 				ExitCode: -1,
-				Err: err,
+				Err:      err,
 			}
 			return
 		}
